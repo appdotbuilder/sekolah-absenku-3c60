@@ -3,92 +3,85 @@ import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import 'dotenv/config';
 import cors from 'cors';
 import superjson from 'superjson';
-import { z } from 'zod';
 
-// Import schemas
+// Schema imports
 import {
   loginInputSchema,
   createUserInputSchema,
-  createSiswaInputSchema,
-  updateSiswaInputSchema,
-  createGuruInputSchema,
-  updateGuruInputSchema,
-  createKelasInputSchema,
-  updateKelasInputSchema,
-  createAbsensiInputSchema,
-  updateAbsensiInputSchema,
-  absenMasukInputSchema,
-  absenPulangInputSchema,
-  pengajuanIzinInputSchema,
-  verifikasiIzinInputSchema,
-  attendanceFilterSchema,
-  updateProfileInputSchema,
-  changePasswordInputSchema
+  updateUserInputSchema,
+  createClassInputSchema,
+  updateClassInputSchema,
+  createStudentInputSchema,
+  updateStudentInputSchema,
+  assignTeacherToClassInputSchema,
+  recordAttendanceInputSchema,
+  updateAttendanceInputSchema,
+  createLeaveRequestInputSchema,
+  approveLeaveRequestInputSchema,
+  attendanceReportFilterSchema,
+  exportFormatSchema
 } from './schema';
 
-// Import handlers
-import { login, getCurrentUser, changePassword } from './handlers/auth';
+// Handler imports
+import { login, logout, getCurrentUser } from './handlers/auth';
 import { 
   createUser, 
-  getUsers, 
-  getUserById, 
   updateUser, 
-  deleteUser 
+  deleteUser, 
+  getAllUsers, 
+  getUsersByRole, 
+  getUserById 
 } from './handlers/users';
 import { 
-  createSiswa, 
-  getSiswa, 
-  getSiswaById, 
-  getSiswaByUserId, 
-  getSiswaByKelas,
-  updateSiswa, 
-  updateSiswaProfile,
-  deleteSiswa 
-} from './handlers/siswa';
+  createClass, 
+  updateClass, 
+  deleteClass, 
+  getAllClasses, 
+  getClassById, 
+  getClassesByTeacher 
+} from './handlers/classes';
 import { 
-  createGuru, 
-  getGuru, 
-  getGuruById, 
-  getGuruByUserId,
-  updateGuru, 
-  updateGuruProfile,
-  deleteGuru 
-} from './handlers/guru';
+  createStudent, 
+  updateStudent, 
+  deleteStudent, 
+  getAllStudents, 
+  getStudentsByClass, 
+  getStudentById, 
+  getStudentByNisNisn 
+} from './handlers/students';
 import { 
-  createKelas, 
-  getKelas, 
-  getKelasById, 
-  getKelasByWaliKelas,
-  updateKelas, 
-  deleteKelas 
-} from './handlers/kelas';
-import {
-  absenMasuk,
-  absenPulang,
-  pengajuanIzin,
-  createAbsensi,
-  verifikasiIzin,
-  updateAbsensi,
-  getAbsensiByFilter,
-  getAbsensiHariIni,
-  getAbsensiBySiswa,
-  getPendingIzin,
-  getAbsensiStats,
-  deleteAbsensi
-} from './handlers/absensi';
+  assignTeacherToClass, 
+  removeTeacherFromClass, 
+  getTeacherAssignments, 
+  getClassAssignments, 
+  updateTeacherAssignment 
+} from './handlers/teacher_assignments';
 import { 
-  getDashboardStats, 
-  getDashboardStatsGuru, 
-  getDashboardStatsSiswa 
-} from './handlers/dashboard';
-import {
-  generateAttendanceReport,
-  generateDailyReport,
-  generateWeeklyReport,
-  generateMonthlyReport,
-  exportReportToPDF,
-  exportReportToExcel
+  recordAttendance, 
+  updateAttendance, 
+  getAttendanceByClass, 
+  getAttendanceByStudent, 
+  getAttendanceReport, 
+  bulkRecordAttendance, 
+  getAttendanceStats 
+} from './handlers/attendance';
+import { 
+  createLeaveRequest, 
+  approveLeaveRequest, 
+  getLeaveRequestsByStatus, 
+  getLeaveRequestsByStudent, 
+  getAllLeaveRequests, 
+  deleteLeaveRequest, 
+  getPendingLeaveRequests 
+} from './handlers/leave_requests';
+import { 
+  generateAttendanceReport, 
+  exportAttendanceReportToPDF, 
+  exportAttendanceReportToExcel, 
+  getAttendanceSummaryReport, 
+  exportReport 
 } from './handlers/reports';
+import { z } from 'zod';
 
 const t = initTRPC.create({
   transformer: superjson,
@@ -109,232 +102,220 @@ const appRouter = router({
       .input(loginInputSchema)
       .mutation(({ input }) => login(input)),
     
+    logout: publicProcedure
+      .input(z.object({ userId: z.number() }))
+      .mutation(({ input }) => logout(input.userId)),
+    
     getCurrentUser: publicProcedure
       .input(z.object({ userId: z.number() }))
-      .query(({ input }) => getCurrentUser(input.userId)),
-    
-    changePassword: publicProcedure
-      .input(changePasswordInputSchema)
-      .mutation(({ input }) => 
-        changePassword(input.user_id, input.current_password, input.new_password)
-      ),
+      .query(({ input }) => getCurrentUser(input.userId))
   }),
 
-  // User management routes (Admin)
+  // User management routes (Admin only)
   users: router({
     create: publicProcedure
       .input(createUserInputSchema)
       .mutation(({ input }) => createUser(input)),
     
-    getAll: publicProcedure
-      .query(() => getUsers()),
-    
-    getById: publicProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getUserById(input.id)),
-    
     update: publicProcedure
-      .input(z.object({ id: z.number(), updates: z.any() }))
-      .mutation(({ input }) => updateUser(input.id, input.updates)),
+      .input(updateUserInputSchema)
+      .mutation(({ input }) => updateUser(input)),
     
     delete: publicProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteUser(input.id)),
-  }),
-
-  // Siswa management routes
-  siswa: router({
-    create: publicProcedure
-      .input(createSiswaInputSchema)
-      .mutation(({ input }) => createSiswa(input)),
     
     getAll: publicProcedure
-      .query(() => getSiswa()),
+      .query(() => getAllUsers()),
+    
+    getByRole: publicProcedure
+      .input(z.object({ role: z.enum(['administrator', 'teacher', 'student']) }))
+      .query(({ input }) => getUsersByRole(input.role)),
     
     getById: publicProcedure
       .input(z.object({ id: z.number() }))
-      .query(({ input }) => getSiswaById(input.id)),
-    
-    getByUserId: publicProcedure
-      .input(z.object({ userId: z.number() }))
-      .query(({ input }) => getSiswaByUserId(input.userId)),
-    
-    getByKelas: publicProcedure
-      .input(z.object({ kelasId: z.number() }))
-      .query(({ input }) => getSiswaByKelas(input.kelasId)),
+      .query(({ input }) => getUserById(input.id))
+  }),
+
+  // Class management routes
+  classes: router({
+    create: publicProcedure
+      .input(createClassInputSchema)
+      .mutation(({ input }) => createClass(input)),
     
     update: publicProcedure
-      .input(updateSiswaInputSchema)
-      .mutation(({ input }) => updateSiswa(input)),
-    
-    updateProfile: publicProcedure
-      .input(updateProfileInputSchema)
-      .mutation(({ input }) => updateSiswaProfile(input)),
+      .input(updateClassInputSchema)
+      .mutation(({ input }) => updateClass(input)),
     
     delete: publicProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteSiswa(input.id)),
-  }),
-
-  // Guru management routes
-  guru: router({
-    create: publicProcedure
-      .input(createGuruInputSchema)
-      .mutation(({ input }) => createGuru(input)),
+      .mutation(({ input }) => deleteClass(input.id)),
     
     getAll: publicProcedure
-      .query(() => getGuru()),
+      .query(() => getAllClasses()),
     
     getById: publicProcedure
       .input(z.object({ id: z.number() }))
-      .query(({ input }) => getGuruById(input.id)),
+      .query(({ input }) => getClassById(input.id)),
     
-    getByUserId: publicProcedure
-      .input(z.object({ userId: z.number() }))
-      .query(({ input }) => getGuruByUserId(input.userId)),
+    getByTeacher: publicProcedure
+      .input(z.object({ teacherId: z.number() }))
+      .query(({ input }) => getClassesByTeacher(input.teacherId))
+  }),
+
+  // Student management routes
+  students: router({
+    create: publicProcedure
+      .input(createStudentInputSchema)
+      .mutation(({ input }) => createStudent(input)),
     
     update: publicProcedure
-      .input(updateGuruInputSchema)
-      .mutation(({ input }) => updateGuru(input)),
-    
-    updateProfile: publicProcedure
-      .input(updateProfileInputSchema)
-      .mutation(({ input }) => updateGuruProfile(input)),
+      .input(updateStudentInputSchema)
+      .mutation(({ input }) => updateStudent(input)),
     
     delete: publicProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteGuru(input.id)),
-  }),
-
-  // Kelas management routes
-  kelas: router({
-    create: publicProcedure
-      .input(createKelasInputSchema)
-      .mutation(({ input }) => createKelas(input)),
+      .mutation(({ input }) => deleteStudent(input.id)),
     
     getAll: publicProcedure
-      .query(() => getKelas()),
+      .query(() => getAllStudents()),
+    
+    getByClass: publicProcedure
+      .input(z.object({ classId: z.number() }))
+      .query(({ input }) => getStudentsByClass(input.classId)),
     
     getById: publicProcedure
       .input(z.object({ id: z.number() }))
-      .query(({ input }) => getKelasById(input.id)),
+      .query(({ input }) => getStudentById(input.id)),
     
-    getByWaliKelas: publicProcedure
-      .input(z.object({ guruId: z.number() }))
-      .query(({ input }) => getKelasByWaliKelas(input.guruId)),
-    
-    update: publicProcedure
-      .input(updateKelasInputSchema)
-      .mutation(({ input }) => updateKelas(input)),
-    
-    delete: publicProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteKelas(input.id)),
+    getByNisNisn: publicProcedure
+      .input(z.object({ nisNisn: z.string() }))
+      .query(({ input }) => getStudentByNisNisn(input.nisNisn))
   }),
 
-  // Attendance routes
-  absensi: router({
-    // Student actions
-    absenMasuk: publicProcedure
-      .input(absenMasukInputSchema)
-      .mutation(({ input }) => absenMasuk(input)),
+  // Teacher assignment routes
+  teacherAssignments: router({
+    assign: publicProcedure
+      .input(assignTeacherToClassInputSchema)
+      .mutation(({ input }) => assignTeacherToClass(input)),
     
-    absenPulang: publicProcedure
-      .input(absenPulangInputSchema)
-      .mutation(({ input }) => absenPulang(input)),
+    remove: publicProcedure
+      .input(z.object({ teacherId: z.number(), classId: z.number() }))
+      .mutation(({ input }) => removeTeacherFromClass(input.teacherId, input.classId)),
     
-    pengajuanIzin: publicProcedure
-      .input(pengajuanIzinInputSchema)
-      .mutation(({ input }) => pengajuanIzin(input)),
-
-    // Teacher/Admin actions
-    create: publicProcedure
-      .input(createAbsensiInputSchema)
-      .mutation(({ input }) => createAbsensi(input)),
+    getByTeacher: publicProcedure
+      .input(z.object({ teacherId: z.number() }))
+      .query(({ input }) => getTeacherAssignments(input.teacherId)),
     
-    verifikasiIzin: publicProcedure
-      .input(verifikasiIzinInputSchema)
-      .mutation(({ input }) => verifikasiIzin(input)),
+    getByClass: publicProcedure
+      .input(z.object({ classId: z.number() }))
+      .query(({ input }) => getClassAssignments(input.classId)),
     
     update: publicProcedure
-      .input(updateAbsensiInputSchema)
-      .mutation(({ input }) => updateAbsensi(input)),
+      .input(z.object({ teacherId: z.number(), classId: z.number(), isHomeroom: z.boolean() }))
+      .mutation(({ input }) => updateTeacherAssignment(input.teacherId, input.classId, input.isHomeroom))
+  }),
 
-    // Queries
-    getByFilter: publicProcedure
-      .input(attendanceFilterSchema)
-      .query(({ input }) => getAbsensiByFilter(input)),
+  // Attendance management routes
+  attendance: router({
+    record: publicProcedure
+      .input(recordAttendanceInputSchema)
+      .mutation(({ input }) => recordAttendance(input)),
     
-    getHariIni: publicProcedure
-      .input(z.object({ kelasId: z.number().optional() }))
-      .query(({ input }) => getAbsensiHariIni(input.kelasId)),
+    update: publicProcedure
+      .input(updateAttendanceInputSchema)
+      .mutation(({ input }) => updateAttendance(input)),
     
-    getBySiswa: publicProcedure
-      .input(z.object({ siswaId: z.number(), limit: z.number().optional() }))
-      .query(({ input }) => getAbsensiBySiswa(input.siswaId, input.limit)),
+    bulkRecord: publicProcedure
+      .input(z.array(recordAttendanceInputSchema))
+      .mutation(({ input }) => bulkRecordAttendance(input)),
     
-    getPendingIzin: publicProcedure
-      .input(z.object({ kelasId: z.number().optional() }))
-      .query(({ input }) => getPendingIzin(input.kelasId)),
+    getByClass: publicProcedure
+      .input(z.object({ classId: z.number(), date: z.string() }))
+      .query(({ input }) => getAttendanceByClass(input.classId, input.date)),
+    
+    getByStudent: publicProcedure
+      .input(z.object({ 
+        studentId: z.number(), 
+        startDate: z.string().optional(), 
+        endDate: z.string().optional() 
+      }))
+      .query(({ input }) => getAttendanceByStudent(input.studentId, input.startDate, input.endDate)),
+    
+    getReport: publicProcedure
+      .input(attendanceReportFilterSchema)
+      .query(({ input }) => getAttendanceReport(input)),
     
     getStats: publicProcedure
       .input(z.object({ 
-        kelasId: z.number().optional(),
-        dateRange: z.object({ start: z.coerce.date(), end: z.coerce.date() }).optional()
+        classId: z.number().optional(), 
+        startDate: z.string().optional(), 
+        endDate: z.string().optional() 
       }))
-      .query(({ input }) => getAbsensiStats(input.kelasId, input.dateRange)),
+      .query(({ input }) => getAttendanceStats(input.classId, input.startDate, input.endDate))
+  }),
+
+  // Leave request routes
+  leaveRequests: router({
+    create: publicProcedure
+      .input(createLeaveRequestInputSchema)
+      .mutation(({ input }) => createLeaveRequest(input)),
+    
+    approve: publicProcedure
+      .input(approveLeaveRequestInputSchema)
+      .mutation(({ input }) => approveLeaveRequest(input)),
+    
+    getByStatus: publicProcedure
+      .input(z.object({ status: z.enum(['pending', 'approved', 'rejected']) }))
+      .query(({ input }) => getLeaveRequestsByStatus(input.status)),
+    
+    getByStudent: publicProcedure
+      .input(z.object({ studentId: z.number() }))
+      .query(({ input }) => getLeaveRequestsByStudent(input.studentId)),
+    
+    getAll: publicProcedure
+      .query(() => getAllLeaveRequests()),
+    
+    getPending: publicProcedure
+      .query(() => getPendingLeaveRequests()),
     
     delete: publicProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteAbsensi(input.id)),
+      .mutation(({ input }) => deleteLeaveRequest(input.id))
   }),
 
-  // Dashboard routes
-  dashboard: router({
-    getStatsAdmin: publicProcedure
-      .query(() => getDashboardStats()),
-    
-    getStatsGuru: publicProcedure
-      .input(z.object({ guruId: z.number() }))
-      .query(({ input }) => getDashboardStatsGuru(input.guruId)),
-    
-    getStatsSiswa: publicProcedure
-      .input(z.object({ siswaId: z.number() }))
-      .query(({ input }) => getDashboardStatsSiswa(input.siswaId)),
-  }),
-
-  // Reports routes
+  // Reporting routes
   reports: router({
-    generateAttendance: publicProcedure
-      .input(attendanceFilterSchema)
+    generate: publicProcedure
+      .input(attendanceReportFilterSchema)
       .query(({ input }) => generateAttendanceReport(input)),
     
-    generateDaily: publicProcedure
-      .input(z.object({ date: z.coerce.date(), kelasId: z.number().optional() }))
-      .query(({ input }) => generateDailyReport(input.date, input.kelasId)),
-    
-    generateWeekly: publicProcedure
-      .input(z.object({ startDate: z.coerce.date(), kelasId: z.number().optional() }))
-      .query(({ input }) => generateWeeklyReport(input.startDate, input.kelasId)),
-    
-    generateMonthly: publicProcedure
-      .input(z.object({ year: z.number(), month: z.number(), kelasId: z.number().optional() }))
-      .query(({ input }) => generateMonthlyReport(input.year, input.month, input.kelasId)),
-    
-    exportToPDF: publicProcedure
+    exportPDF: publicProcedure
       .input(z.object({ 
-        reportData: z.any(), 
-        reportType: z.enum(['daily', 'weekly', 'monthly', 'custom']) 
+        filters: attendanceReportFilterSchema, 
+        filename: z.string().optional() 
       }))
-      .mutation(({ input }) => exportReportToPDF(input.reportData, input.reportType)),
+      .mutation(({ input }) => exportAttendanceReportToPDF(input.filters, input.filename)),
     
-    exportToExcel: publicProcedure
+    exportExcel: publicProcedure
       .input(z.object({ 
-        reportData: z.any(), 
-        reportType: z.enum(['daily', 'weekly', 'monthly', 'custom']) 
+        filters: attendanceReportFilterSchema, 
+        filename: z.string().optional() 
       }))
-      .mutation(({ input }) => exportReportToExcel(input.reportData, input.reportType)),
-  }),
+      .mutation(({ input }) => exportAttendanceReportToExcel(input.filters, input.filename)),
+    
+    getSummary: publicProcedure
+      .input(attendanceReportFilterSchema)
+      .query(({ input }) => getAttendanceSummaryReport(input)),
+    
+    export: publicProcedure
+      .input(z.object({ 
+        filters: attendanceReportFilterSchema, 
+        format: exportFormatSchema,
+        filename: z.string().optional() 
+      }))
+      .mutation(({ input }) => exportReport(input.filters, input.format, input.filename))
+  })
 });
 
 export type AppRouter = typeof appRouter;
@@ -351,7 +332,7 @@ async function start() {
     },
   });
   server.listen(port);
-  console.log(`TRPC server listening at port: ${port}`);
+  console.log(`TRPC Attendance Management Server listening at port: ${port}`);
 }
 
 start();

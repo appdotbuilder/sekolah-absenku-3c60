@@ -1,243 +1,234 @@
 import { z } from 'zod';
 
-// Enums
-export const userRoleEnum = z.enum(['admin', 'guru', 'siswa']);
-export const absensiStatusEnum = z.enum(['hadir', 'izin', 'sakit', 'alpha', 'pending']);
+// User roles enum
+export const userRoleSchema = z.enum(['administrator', 'teacher', 'student']);
+export type UserRole = z.infer<typeof userRoleSchema>;
 
-// User schemas
+// Attendance status enum
+export const attendanceStatusSchema = z.enum(['present', 'leave', 'sick', 'absent']);
+export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>;
+
+// Leave request status enum
+export const leaveRequestStatusSchema = z.enum(['pending', 'approved', 'rejected']);
+export type LeaveRequestStatus = z.infer<typeof leaveRequestStatusSchema>;
+
+// User schema
 export const userSchema = z.object({
   id: z.number(),
-  username: z.string(), // Can be username/NIP/NISN based on role
+  username: z.string(), // NIS/NISN for students, email/username for admin/teachers
   password_hash: z.string(),
-  role: userRoleEnum,
+  full_name: z.string(),
+  email: z.string().nullable(),
+  role: userRoleSchema,
+  is_active: z.boolean(),
   created_at: z.coerce.date(),
   updated_at: z.coerce.date()
 });
 
 export type User = z.infer<typeof userSchema>;
 
+// Class schema
+export const classSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  grade_level: z.string(),
+  homeroom_teacher_id: z.number().nullable(),
+  created_at: z.coerce.date()
+});
+
+export type Class = z.infer<typeof classSchema>;
+
+// Student schema
+export const studentSchema = z.object({
+  id: z.number(),
+  user_id: z.number(),
+  nis_nisn: z.string(), // Unique student identifier
+  class_id: z.number(),
+  created_at: z.coerce.date()
+});
+
+export type Student = z.infer<typeof studentSchema>;
+
+// Teacher class assignment schema
+export const teacherClassAssignmentSchema = z.object({
+  id: z.number(),
+  teacher_id: z.number(),
+  class_id: z.number(),
+  is_homeroom: z.boolean(),
+  assigned_at: z.coerce.date()
+});
+
+export type TeacherClassAssignment = z.infer<typeof teacherClassAssignmentSchema>;
+
+// Attendance record schema
+export const attendanceRecordSchema = z.object({
+  id: z.number(),
+  student_id: z.number(),
+  class_id: z.number(),
+  date: z.coerce.date(),
+  status: attendanceStatusSchema,
+  check_in_time: z.coerce.date().nullable(),
+  check_out_time: z.coerce.date().nullable(),
+  notes: z.string().nullable(),
+  recorded_by: z.number(), // Teacher who recorded the attendance
+  created_at: z.coerce.date()
+});
+
+export type AttendanceRecord = z.infer<typeof attendanceRecordSchema>;
+
+// Leave request schema
+export const leaveRequestSchema = z.object({
+  id: z.number(),
+  student_id: z.number(),
+  request_date: z.coerce.date(),
+  start_date: z.coerce.date(),
+  end_date: z.coerce.date(),
+  reason: z.string(),
+  status: leaveRequestStatusSchema,
+  approved_by: z.number().nullable(),
+  approved_at: z.coerce.date().nullable(),
+  created_at: z.coerce.date()
+});
+
+export type LeaveRequest = z.infer<typeof leaveRequestSchema>;
+
+// Input schemas for user management
 export const createUserInputSchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-  role: userRoleEnum
+  username: z.string().min(1),
+  password: z.string().min(6),
+  full_name: z.string().min(1),
+  email: z.string().email().nullable(),
+  role: userRoleSchema
 });
 
 export type CreateUserInput = z.infer<typeof createUserInputSchema>;
 
+export const updateUserInputSchema = z.object({
+  id: z.number(),
+  username: z.string().min(1).optional(),
+  password: z.string().min(6).optional(),
+  full_name: z.string().min(1).optional(),
+  email: z.string().email().nullable().optional(),
+  role: userRoleSchema.optional(),
+  is_active: z.boolean().optional()
+});
+
+export type UpdateUserInput = z.infer<typeof updateUserInputSchema>;
+
+// Input schemas for class management
+export const createClassInputSchema = z.object({
+  name: z.string().min(1),
+  grade_level: z.string().min(1),
+  homeroom_teacher_id: z.number().nullable()
+});
+
+export type CreateClassInput = z.infer<typeof createClassInputSchema>;
+
+export const updateClassInputSchema = z.object({
+  id: z.number(),
+  name: z.string().min(1).optional(),
+  grade_level: z.string().min(1).optional(),
+  homeroom_teacher_id: z.number().nullable().optional()
+});
+
+export type UpdateClassInput = z.infer<typeof updateClassInputSchema>;
+
+// Input schemas for student management
+export const createStudentInputSchema = z.object({
+  user_id: z.number(),
+  nis_nisn: z.string().min(1),
+  class_id: z.number()
+});
+
+export type CreateStudentInput = z.infer<typeof createStudentInputSchema>;
+
+export const updateStudentInputSchema = z.object({
+  id: z.number(),
+  nis_nisn: z.string().min(1).optional(),
+  class_id: z.number().optional()
+});
+
+export type UpdateStudentInput = z.infer<typeof updateStudentInputSchema>;
+
+// Input schemas for teacher class assignments
+export const assignTeacherToClassInputSchema = z.object({
+  teacher_id: z.number(),
+  class_id: z.number(),
+  is_homeroom: z.boolean()
+});
+
+export type AssignTeacherToClassInput = z.infer<typeof assignTeacherToClassInputSchema>;
+
+// Input schemas for attendance management
+export const recordAttendanceInputSchema = z.object({
+  student_id: z.number(),
+  class_id: z.number(),
+  date: z.string(), // ISO date string
+  status: attendanceStatusSchema,
+  check_in_time: z.string().nullable(), // ISO datetime string
+  check_out_time: z.string().nullable(), // ISO datetime string
+  notes: z.string().nullable(),
+  recorded_by: z.number()
+});
+
+export type RecordAttendanceInput = z.infer<typeof recordAttendanceInputSchema>;
+
+export const updateAttendanceInputSchema = z.object({
+  id: z.number(),
+  status: attendanceStatusSchema.optional(),
+  check_in_time: z.string().nullable().optional(),
+  check_out_time: z.string().nullable().optional(),
+  notes: z.string().nullable().optional()
+});
+
+export type UpdateAttendanceInput = z.infer<typeof updateAttendanceInputSchema>;
+
+// Input schemas for leave requests
+export const createLeaveRequestInputSchema = z.object({
+  student_id: z.number(),
+  start_date: z.string(), // ISO date string
+  end_date: z.string(), // ISO date string
+  reason: z.string().min(1)
+});
+
+export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestInputSchema>;
+
+export const approveLeaveRequestInputSchema = z.object({
+  id: z.number(),
+  approved_by: z.number(),
+  status: z.enum(['approved', 'rejected'])
+});
+
+export type ApproveLeaveRequestInput = z.infer<typeof approveLeaveRequestInputSchema>;
+
+// Input schemas for reporting
+export const attendanceReportFilterSchema = z.object({
+  class_id: z.number().optional(),
+  student_id: z.number().optional(),
+  start_date: z.string().optional(), // ISO date string
+  end_date: z.string().optional(), // ISO date string
+  status: attendanceStatusSchema.optional()
+});
+
+export type AttendanceReportFilter = z.infer<typeof attendanceReportFilterSchema>;
+
+export const exportFormatSchema = z.enum(['pdf', 'excel']);
+export type ExportFormat = z.infer<typeof exportFormatSchema>;
+
+// Login schema
 export const loginInputSchema = z.object({
-  username: z.string().min(1, "Username/NIP/NISN is required"),
-  password: z.string().min(1, "Password is required"),
-  role: userRoleEnum
+  username: z.string().min(1),
+  password: z.string().min(1)
 });
 
 export type LoginInput = z.infer<typeof loginInputSchema>;
 
-// Siswa schemas
-export const siswaSchema = z.object({
-  id: z.number(),
+// Authentication context
+export const authContextSchema = z.object({
   user_id: z.number(),
-  nisn: z.string(),
-  nama: z.string(),
-  kelas_id: z.number(),
-  foto: z.string().nullable(),
-  created_at: z.coerce.date(),
-  updated_at: z.coerce.date()
+  username: z.string(),
+  role: userRoleSchema,
+  full_name: z.string()
 });
 
-export type Siswa = z.infer<typeof siswaSchema>;
-
-export const createSiswaInputSchema = z.object({
-  user_id: z.number(),
-  nisn: z.string().min(1, "NISN is required"),
-  nama: z.string().min(1, "Nama is required"),
-  kelas_id: z.number(),
-  foto: z.string().nullable().optional()
-});
-
-export type CreateSiswaInput = z.infer<typeof createSiswaInputSchema>;
-
-export const updateSiswaInputSchema = z.object({
-  id: z.number(),
-  nisn: z.string().optional(),
-  nama: z.string().optional(),
-  kelas_id: z.number().optional(),
-  foto: z.string().nullable().optional()
-});
-
-export type UpdateSiswaInput = z.infer<typeof updateSiswaInputSchema>;
-
-// Guru schemas
-export const guruSchema = z.object({
-  id: z.number(),
-  user_id: z.number(),
-  nip: z.string(),
-  nama: z.string(),
-  foto: z.string().nullable(),
-  created_at: z.coerce.date(),
-  updated_at: z.coerce.date()
-});
-
-export type Guru = z.infer<typeof guruSchema>;
-
-export const createGuruInputSchema = z.object({
-  user_id: z.number(),
-  nip: z.string().min(1, "NIP is required"),
-  nama: z.string().min(1, "Nama is required"),
-  foto: z.string().nullable().optional()
-});
-
-export type CreateGuruInput = z.infer<typeof createGuruInputSchema>;
-
-export const updateGuruInputSchema = z.object({
-  id: z.number(),
-  nip: z.string().optional(),
-  nama: z.string().optional(),
-  foto: z.string().nullable().optional()
-});
-
-export type UpdateGuruInput = z.infer<typeof updateGuruInputSchema>;
-
-// Kelas schemas
-export const kelasSchema = z.object({
-  id: z.number(),
-  nama_kelas: z.string(),
-  wali_kelas_id: z.number().nullable(),
-  created_at: z.coerce.date(),
-  updated_at: z.coerce.date()
-});
-
-export type Kelas = z.infer<typeof kelasSchema>;
-
-export const createKelasInputSchema = z.object({
-  nama_kelas: z.string().min(1, "Nama kelas is required"),
-  wali_kelas_id: z.number().nullable().optional()
-});
-
-export type CreateKelasInput = z.infer<typeof createKelasInputSchema>;
-
-export const updateKelasInputSchema = z.object({
-  id: z.number(),
-  nama_kelas: z.string().optional(),
-  wali_kelas_id: z.number().nullable().optional()
-});
-
-export type UpdateKelasInput = z.infer<typeof updateKelasInputSchema>;
-
-// Absensi schemas
-export const absensiSchema = z.object({
-  id: z.number(),
-  siswa_id: z.number(),
-  guru_id: z.number().nullable(),
-  kelas_id: z.number(),
-  status: absensiStatusEnum,
-  tanggal: z.coerce.date(),
-  waktu_masuk: z.string().nullable(), // TIME type as string
-  waktu_pulang: z.string().nullable(), // TIME type as string
-  keterangan: z.string().nullable(),
-  created_at: z.coerce.date(),
-  updated_at: z.coerce.date()
-});
-
-export type Absensi = z.infer<typeof absensiSchema>;
-
-export const createAbsensiInputSchema = z.object({
-  siswa_id: z.number(),
-  guru_id: z.number().nullable().optional(),
-  kelas_id: z.number(),
-  status: absensiStatusEnum,
-  tanggal: z.coerce.date(),
-  waktu_masuk: z.string().nullable().optional(),
-  waktu_pulang: z.string().nullable().optional(),
-  keterangan: z.string().nullable().optional()
-});
-
-export type CreateAbsensiInput = z.infer<typeof createAbsensiInputSchema>;
-
-export const updateAbsensiInputSchema = z.object({
-  id: z.number(),
-  status: absensiStatusEnum.optional(),
-  waktu_masuk: z.string().nullable().optional(),
-  waktu_pulang: z.string().nullable().optional(),
-  keterangan: z.string().nullable().optional()
-});
-
-export type UpdateAbsensiInput = z.infer<typeof updateAbsensiInputSchema>;
-
-// Absen masuk/pulang schemas for student actions
-export const absenMasukInputSchema = z.object({
-  siswa_id: z.number(),
-  kelas_id: z.number()
-});
-
-export type AbsenMasukInput = z.infer<typeof absenMasukInputSchema>;
-
-export const absenPulangInputSchema = z.object({
-  absensi_id: z.number()
-});
-
-export type AbsenPulangInput = z.infer<typeof absenPulangInputSchema>;
-
-// Izin/Sakit application schema
-export const pengajuanIzinInputSchema = z.object({
-  siswa_id: z.number(),
-  kelas_id: z.number(),
-  tanggal: z.coerce.date(),
-  status: z.enum(['izin', 'sakit']),
-  keterangan: z.string().min(1, "Keterangan is required")
-});
-
-export type PengajuanIzinInput = z.infer<typeof pengajuanIzinInputSchema>;
-
-// Verifikasi izin/sakit schema
-export const verifikasiIzinInputSchema = z.object({
-  absensi_id: z.number(),
-  guru_id: z.number(),
-  status: z.enum(['izin', 'sakit', 'alpha']) // Admin/Guru can approve or reject (make it alpha)
-});
-
-export type VerifikasiIzinInput = z.infer<typeof verifikasiIzinInputSchema>;
-
-// Filter schemas for reports and attendance lists
-export const attendanceFilterSchema = z.object({
-  kelas_id: z.number().optional(),
-  siswa_id: z.number().optional(),
-  tanggal_mulai: z.coerce.date().optional(),
-  tanggal_selesai: z.coerce.date().optional(),
-  status: absensiStatusEnum.optional()
-});
-
-export type AttendanceFilter = z.infer<typeof attendanceFilterSchema>;
-
-// Dashboard statistics schema
-export const dashboardStatsSchema = z.object({
-  total_siswa: z.number(),
-  total_guru: z.number(),
-  total_kelas: z.number(),
-  absensi_hari_ini: z.object({
-    hadir: z.number(),
-    izin: z.number(),
-    sakit: z.number(),
-    alpha: z.number(),
-    pending: z.number()
-  }),
-  persentase_kehadiran: z.number()
-});
-
-export type DashboardStats = z.infer<typeof dashboardStatsSchema>;
-
-// Update profile and password schemas
-export const updateProfileInputSchema = z.object({
-  user_id: z.number(),
-  nama: z.string().optional(),
-  foto: z.string().nullable().optional()
-});
-
-export type UpdateProfileInput = z.infer<typeof updateProfileInputSchema>;
-
-export const changePasswordInputSchema = z.object({
-  user_id: z.number(),
-  current_password: z.string().min(1, "Current password is required"),
-  new_password: z.string().min(6, "New password must be at least 6 characters")
-});
-
-export type ChangePasswordInput = z.infer<typeof changePasswordInputSchema>;
+export type AuthContext = z.infer<typeof authContextSchema>;
