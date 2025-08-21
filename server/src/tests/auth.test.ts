@@ -1,296 +1,325 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import crypto from 'crypto';
 import { resetDB, createDB } from '../helpers';
 import { db } from '../db';
-import { usersTable, guruTable, siswaTable, kelasTable } from '../db/schema';
-import { type LoginInput } from '../schema';
-import { login, getCurrentUser, changePassword } from '../handlers/auth';
+import { usersTable } from '../db/schema';
+import { type LoginInput, type CreateUserInput } from '../schema';
+import { login, logout, getCurrentUser } from '../handlers/auth';
 import { eq } from 'drizzle-orm';
 
-// Test users data
-const adminPassword = 'admin123';
-const guruPassword = 'guru123';
-const siswaPassword = 'siswa123';
+// Password hashing helper functions
+function hashPassword(password: string, salt: string): string {
+  return crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+}
 
-describe('auth handlers', () => {
+function createPasswordHash(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = hashPassword(password, salt);
+  return salt + hash;
+}
+
+// Test data
+const testUserInput: CreateUserInput = {
+  username: 'testuser',
+  password: 'testpassword123',
+  full_name: 'Test User',
+  email: 'test@example.com',
+  role: 'student'
+};
+
+const testTeacherInput: CreateUserInput = {
+  username: 'teacher001',
+  password: 'teacherpass456',
+  full_name: 'Jane Teacher',
+  email: 'jane@school.com',
+  role: 'teacher'
+};
+
+const testAdminInput: CreateUserInput = {
+  username: 'admin',
+  password: 'adminpass789',
+  full_name: 'Admin User',
+  email: 'admin@school.com',
+  role: 'administrator'
+};
+
+async function createTestUser(userData: CreateUserInput) {
+  const passwordHash = createPasswordHash(userData.password);
+  
+  const result = await db.insert(usersTable)
+    .values({
+      username: userData.username,
+      password_hash: passwordHash,
+      full_name: userData.full_name,
+      email: userData.email,
+      role: userData.role,
+      is_active: true
+    })
+    .returning()
+    .execute();
+
+  return result[0];
+}
+
+describe('Authentication Handlers', () => {
   beforeEach(createDB);
   afterEach(resetDB);
 
-  it('should login admin successfully', async () => {
-    // Create admin user
-    const adminPasswordHash = await Bun.password.hash(adminPassword);
-    const adminResult = await db.insert(usersTable)
-      .values({
-        username: 'admin',
-        password_hash: adminPasswordHash,
-        role: 'admin'
-      })
-      .returning()
-      .execute();
+  describe('login', () => {
+    it('should login successfully with valid credentials', async () => {
+      // Create test user
+      const user = await createTestUser(testUserInput);
+      
+      const loginInput: LoginInput = {
+        username: testUserInput.username,
+        password: testUserInput.password
+      };
 
-    const adminInput: LoginInput = {
-      username: 'admin',
-      password: adminPassword,
-      role: 'admin'
-    };
+      const result = await login(loginInput);
 
-    const result = await login(adminInput);
+      expect(result.user_id).toBe(user.id);
+      expect(result.username).toBe(testUserInput.username);
+      expect(result.role).toBe(testUserInput.role);
+      expect(result.full_name).toBe(testUserInput.full_name);
+    });
 
-    expect(result).toBeDefined();
-    expect(result?.username).toBe('admin');
-    expect(result?.role).toBe('admin');
-    expect(result?.id).toBe(adminResult[0].id);
-    expect((result as any)?.password_hash).toBeUndefined(); // Password should not be returned
+    it('should login different user roles successfully', async () => {
+      // Create teacher user
+      const teacher = await createTestUser(testTeacherInput);
+      
+      const loginInput: LoginInput = {
+        username: testTeacherInput.username,
+        password: testTeacherInput.password
+      };
+
+      const result = await login(loginInput);
+
+      expect(result.user_id).toBe(teacher.id);
+      expect(result.username).toBe(testTeacherInput.username);
+      expect(result.role).toBe('teacher');
+      expect(result.full_name).toBe(testTeacherInput.full_name);
+    });
+
+    it('should throw error for non-existent username', async () => {
+      const loginInput: LoginInput = {
+        username: 'nonexistent',
+        password: 'somepassword'
+      };
+
+      await expect(login(loginInput)).rejects.toThrow(/Invalid credentials/i);
+    });
+
+    it('should throw error for incorrect password', async () => {
+      // Create test user
+      await createTestUser(testUserInput);
+      
+      const loginInput: LoginInput = {
+        username: testUserInput.username,
+        password: 'wrongpassword'
+      };
+
+      await expect(login(loginInput)).rejects.toThrow(/Invalid credentials/i);
+    });
+
+    it('should throw error for inactive user', async () => {
+      // Create inactive user
+      const passwordHash = createPasswordHash(testUserInput.password);
+      
+      await db.insert(usersTable)
+        .values({
+          username: testUserInput.username,
+          password_hash: passwordHash,
+          full_name: testUserInput.full_name,
+          email: testUserInput.email,
+          role: testUserInput.role,
+          is_active: false // Inactive user
+        })
+        .execute();
+
+      const loginInput: LoginInput = {
+        username: testUserInput.username,
+        password: testUserInput.password
+      };
+
+      await expect(login(loginInput)).rejects.toThrow(/Account is deactivated/i);
+    });
+
+    it('should handle empty username', async () => {
+      const loginInput: LoginInput = {
+        username: '',
+        password: 'somepassword'
+      };
+
+      await expect(login(loginInput)).rejects.toThrow(/Invalid credentials/i);
+    });
+
+    it('should handle administrator login', async () => {
+      // Create admin user
+      const admin = await createTestUser(testAdminInput);
+      
+      const loginInput: LoginInput = {
+        username: testAdminInput.username,
+        password: testAdminInput.password
+      };
+
+      const result = await login(loginInput);
+
+      expect(result.user_id).toBe(admin.id);
+      expect(result.username).toBe(testAdminInput.username);
+      expect(result.role).toBe('administrator');
+      expect(result.full_name).toBe(testAdminInput.full_name);
+    });
   });
 
-  it('should login guru with NIP successfully', async () => {
-    // Create guru user
-    const guruPasswordHash = await Bun.password.hash(guruPassword);
-    const userResult = await db.insert(usersTable)
-      .values({
-        username: 'guru_user',
-        password_hash: guruPasswordHash,
-        role: 'guru'
-      })
-      .returning()
-      .execute();
+  describe('logout', () => {
+    it('should logout successfully for existing user', async () => {
+      // Create test user
+      const user = await createTestUser(testUserInput);
 
-    // Create guru profile
-    await db.insert(guruTable)
-      .values({
-        user_id: userResult[0].id,
-        nip: '123456789',
-        nama: 'Guru Test'
-      })
-      .execute();
+      const result = await logout(user.id);
 
-    const guruInput: LoginInput = {
-      username: '123456789', // Using NIP as username
-      password: guruPassword,
-      role: 'guru'
-    };
+      expect(result.success).toBe(true);
+    });
 
-    const result = await login(guruInput);
+    it('should throw error for non-existent user ID', async () => {
+      const nonExistentUserId = 99999;
 
-    expect(result).toBeDefined();
-    expect(result?.role).toBe('guru');
-    expect(result?.id).toBe(userResult[0].id);
-    expect((result as any)?.password_hash).toBeUndefined();
+      await expect(logout(nonExistentUserId)).rejects.toThrow(/User not found/i);
+    });
+
+    it('should logout successfully for different user roles', async () => {
+      // Create teacher user
+      const teacher = await createTestUser(testTeacherInput);
+
+      const result = await logout(teacher.id);
+
+      expect(result.success).toBe(true);
+    });
   });
 
-  it('should login siswa with NISN successfully', async () => {
-    // Create prerequisite kelas
-    const kelasResult = await db.insert(kelasTable)
-      .values({
-        nama_kelas: 'X-1'
-      })
-      .returning()
-      .execute();
+  describe('getCurrentUser', () => {
+    it('should return user context for existing active user', async () => {
+      // Create test user
+      const user = await createTestUser(testUserInput);
 
-    // Create siswa user
-    const siswaPasswordHash = await Bun.password.hash(siswaPassword);
-    const userResult = await db.insert(usersTable)
-      .values({
-        username: 'siswa_user',
-        password_hash: siswaPasswordHash,
-        role: 'siswa'
-      })
-      .returning()
-      .execute();
+      const result = await getCurrentUser(user.id);
 
-    // Create siswa profile
-    await db.insert(siswaTable)
-      .values({
-        user_id: userResult[0].id,
-        nisn: '1234567890',
-        nama: 'Siswa Test',
-        kelas_id: kelasResult[0].id
-      })
-      .execute();
+      expect(result).not.toBeNull();
+      expect(result!.user_id).toBe(user.id);
+      expect(result!.username).toBe(testUserInput.username);
+      expect(result!.role).toBe(testUserInput.role);
+      expect(result!.full_name).toBe(testUserInput.full_name);
+    });
 
-    const siswaInput: LoginInput = {
-      username: '1234567890', // Using NISN as username
-      password: siswaPassword,
-      role: 'siswa'
-    };
+    it('should return null for non-existent user ID', async () => {
+      const nonExistentUserId = 99999;
 
-    const result = await login(siswaInput);
+      const result = await getCurrentUser(nonExistentUserId);
 
-    expect(result).toBeDefined();
-    expect(result?.role).toBe('siswa');
-    expect(result?.id).toBe(userResult[0].id);
-    expect((result as any)?.password_hash).toBeUndefined();
+      expect(result).toBeNull();
+    });
+
+    it('should return null for inactive user', async () => {
+      // Create inactive user
+      const passwordHash = createPasswordHash(testUserInput.password);
+      
+      const insertResult = await db.insert(usersTable)
+        .values({
+          username: testUserInput.username,
+          password_hash: passwordHash,
+          full_name: testUserInput.full_name,
+          email: testUserInput.email,
+          role: testUserInput.role,
+          is_active: false // Inactive user
+        })
+        .returning()
+        .execute();
+
+      const result = await getCurrentUser(insertResult[0].id);
+
+      expect(result).toBeNull();
+    });
+
+    it('should return correct context for different user roles', async () => {
+      // Create admin user
+      const admin = await createTestUser(testAdminInput);
+
+      const result = await getCurrentUser(admin.id);
+
+      expect(result).not.toBeNull();
+      expect(result!.user_id).toBe(admin.id);
+      expect(result!.username).toBe(testAdminInput.username);
+      expect(result!.role).toBe('administrator');
+      expect(result!.full_name).toBe(testAdminInput.full_name);
+    });
+
+    it('should verify user still exists in database', async () => {
+      // Create test user
+      const user = await createTestUser(testUserInput);
+
+      // Verify user exists in database
+      const dbUsers = await db.select()
+        .from(usersTable)
+        .where(eq(usersTable.id, user.id))
+        .execute();
+
+      expect(dbUsers).toHaveLength(1);
+      expect(dbUsers[0].username).toBe(testUserInput.username);
+
+      // Get current user should work
+      const result = await getCurrentUser(user.id);
+      expect(result).not.toBeNull();
+    });
   });
 
-  it('should return null for invalid username', async () => {
-    const invalidInput: LoginInput = {
-      username: 'nonexistent',
-      password: 'password',
-      role: 'admin'
-    };
+  describe('Integration scenarios', () => {
+    it('should handle complete login flow', async () => {
+      // Create user
+      const user = await createTestUser(testUserInput);
 
-    const result = await login(invalidInput);
-    expect(result).toBeNull();
-  });
+      // Login
+      const loginInput: LoginInput = {
+        username: testUserInput.username,
+        password: testUserInput.password
+      };
 
-  it('should return null for invalid password', async () => {
-    // Create admin user
-    const adminPasswordHash = await Bun.password.hash(adminPassword);
-    await db.insert(usersTable)
-      .values({
-        username: 'admin',
-        password_hash: adminPasswordHash,
-        role: 'admin'
-      })
-      .execute();
+      const loginResult = await login(loginInput);
+      expect(loginResult.user_id).toBe(user.id);
 
-    const invalidInput: LoginInput = {
-      username: 'admin',
-      password: 'wrongpassword',
-      role: 'admin'
-    };
+      // Get current user
+      const currentUser = await getCurrentUser(loginResult.user_id);
+      expect(currentUser).not.toBeNull();
+      expect(currentUser!.user_id).toBe(user.id);
 
-    const result = await login(invalidInput);
-    expect(result).toBeNull();
-  });
+      // Logout
+      const logoutResult = await logout(loginResult.user_id);
+      expect(logoutResult.success).toBe(true);
+    });
 
-  it('should return null for mismatched role', async () => {
-    // Create admin user
-    const adminPasswordHash = await Bun.password.hash(adminPassword);
-    await db.insert(usersTable)
-      .values({
-        username: 'admin',
-        password_hash: adminPasswordHash,
-        role: 'admin'
-      })
-      .execute();
+    it('should handle multiple users with different roles', async () => {
+      // Create multiple users
+      const student = await createTestUser(testUserInput);
+      const teacher = await createTestUser(testTeacherInput);
+      const admin = await createTestUser(testAdminInput);
 
-    // Try to login as guru with admin username
-    const mismatchedInput: LoginInput = {
-      username: 'admin',
-      password: adminPassword,
-      role: 'guru'
-    };
+      // Test each user login
+      const studentLogin = await login({
+        username: testUserInput.username,
+        password: testUserInput.password
+      });
+      expect(studentLogin.role).toBe('student');
 
-    const result = await login(mismatchedInput);
-    expect(result).toBeNull();
-  });
+      const teacherLogin = await login({
+        username: testTeacherInput.username,
+        password: testTeacherInput.password
+      });
+      expect(teacherLogin.role).toBe('teacher');
 
-  it('should get current user successfully', async () => {
-    // Create user
-    const passwordHash = await Bun.password.hash('password123');
-    const userResult = await db.insert(usersTable)
-      .values({
-        username: 'testuser',
-        password_hash: passwordHash,
-        role: 'admin'
-      })
-      .returning()
-      .execute();
-
-    const result = await getCurrentUser(userResult[0].id);
-
-    expect(result).toBeDefined();
-    expect(result?.id).toBe(userResult[0].id);
-    expect(result?.username).toBe('testuser');
-    expect(result?.role).toBe('admin');
-    expect((result as any)?.password_hash).toBeUndefined(); // Password should not be returned
-  });
-
-  it('should return null for non-existent user ID', async () => {
-    const result = await getCurrentUser(999);
-    expect(result).toBeNull();
-  });
-
-  it('should change password successfully', async () => {
-    const currentPassword = 'oldpassword123';
-    const newPassword = 'newpassword123';
-
-    // Create user
-    const currentPasswordHash = await Bun.password.hash(currentPassword);
-    const userResult = await db.insert(usersTable)
-      .values({
-        username: 'testuser',
-        password_hash: currentPasswordHash,
-        role: 'admin'
-      })
-      .returning()
-      .execute();
-
-    const result = await changePassword(userResult[0].id, currentPassword, newPassword);
-    expect(result).toBe(true);
-
-    // Verify password was actually changed
-    const updatedUsers = await db.select()
-      .from(usersTable)
-      .where(eq(usersTable.id, userResult[0].id))
-      .execute();
-
-    const updatedUser = updatedUsers[0];
-    expect(updatedUser).toBeDefined();
-
-    // Verify new password works
-    const newPasswordValid = await Bun.password.verify(newPassword, updatedUser.password_hash);
-    expect(newPasswordValid).toBe(true);
-
-    // Verify old password no longer works
-    const oldPasswordValid = await Bun.password.verify(currentPassword, updatedUser.password_hash);
-    expect(oldPasswordValid).toBe(false);
-  });
-
-  it('should return false for wrong current password', async () => {
-    const actualPassword = 'correctpassword';
-    const wrongCurrentPassword = 'wrongcurrentpassword';
-    const newPassword = 'newpassword123';
-
-    // Create user
-    const passwordHash = await Bun.password.hash(actualPassword);
-    const userResult = await db.insert(usersTable)
-      .values({
-        username: 'testuser',
-        password_hash: passwordHash,
-        role: 'admin'
-      })
-      .returning()
-      .execute();
-
-    const result = await changePassword(userResult[0].id, wrongCurrentPassword, newPassword);
-    expect(result).toBe(false);
-
-    // Verify password was not changed
-    const unchangedUsers = await db.select()
-      .from(usersTable)
-      .where(eq(usersTable.id, userResult[0].id))
-      .execute();
-
-    const unchangedUser = unchangedUsers[0];
-    const originalPasswordValid = await Bun.password.verify(actualPassword, unchangedUser.password_hash);
-    expect(originalPasswordValid).toBe(true);
-  });
-
-  it('should return false for non-existent user on password change', async () => {
-    const result = await changePassword(999, 'currentpass', 'newpass');
-    expect(result).toBe(false);
-  });
-
-  it('should handle guru login with non-existent NIP', async () => {
-    const guruInput: LoginInput = {
-      username: '999999999', // Non-existent NIP
-      password: 'password',
-      role: 'guru'
-    };
-
-    const result = await login(guruInput);
-    expect(result).toBeNull();
-  });
-
-  it('should handle siswa login with non-existent NISN', async () => {
-    const siswaInput: LoginInput = {
-      username: '9999999999', // Non-existent NISN
-      password: 'password',
-      role: 'siswa'
-    };
-
-    const result = await login(siswaInput);
-    expect(result).toBeNull();
+      const adminLogin = await login({
+        username: testAdminInput.username,
+        password: testAdminInput.password
+      });
+      expect(adminLogin.role).toBe('administrator');
+    });
   });
 });
