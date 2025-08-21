@@ -8,26 +8,71 @@ import {
     type VerifikasiIzinInput,
     type AttendanceFilter 
 } from '../schema';
+import { db } from '../db';
+import { absensiTable, siswaTable, kelasTable } from '../db/schema';
+import { eq, and } from 'drizzle-orm';
 
 // Student attendance actions
 export async function absenMasuk(input: AbsenMasukInput): Promise<Absensi> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is to record student check-in
-    // Should create new absensi record with status 'hadir' and current time as waktu_masuk
-    // Should check if student already has attendance for today
-    return {
-        id: 0,
-        siswa_id: input.siswa_id,
-        guru_id: null,
-        kelas_id: input.kelas_id,
-        status: 'hadir',
-        tanggal: new Date(),
-        waktu_masuk: new Date().toTimeString().slice(0, 8), // HH:mm:ss format
-        waktu_pulang: null,
-        keterangan: null,
-        created_at: new Date(),
-        updated_at: new Date()
-    };
+    try {
+        // Get current date and time
+        const today = new Date();
+        const todayDateString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+        const currentTime = today.toTimeString().slice(0, 8); // HH:mm:ss format
+
+        // Check if student exists and belongs to the specified class
+        const student = await db.select()
+            .from(siswaTable)
+            .where(and(
+                eq(siswaTable.id, input.siswa_id),
+                eq(siswaTable.kelas_id, input.kelas_id)
+            ))
+            .limit(1)
+            .execute();
+
+        if (student.length === 0) {
+            throw new Error('Student not found or does not belong to the specified class');
+        }
+
+        // Check if attendance already exists for today
+        const existingAttendance = await db.select()
+            .from(absensiTable)
+            .where(and(
+                eq(absensiTable.siswa_id, input.siswa_id),
+                eq(absensiTable.tanggal, todayDateString)
+            ))
+            .limit(1)
+            .execute();
+
+        if (existingAttendance.length > 0) {
+            throw new Error('Attendance already recorded for today');
+        }
+
+        // Create new attendance record
+        const result = await db.insert(absensiTable)
+            .values({
+                siswa_id: input.siswa_id,
+                guru_id: null,
+                kelas_id: input.kelas_id,
+                status: 'hadir',
+                tanggal: todayDateString,
+                waktu_masuk: currentTime,
+                waktu_pulang: null,
+                keterangan: null
+            })
+            .returning()
+            .execute();
+
+        // Convert string date back to Date object for return type compatibility
+        const attendance = result[0];
+        return {
+            ...attendance,
+            tanggal: new Date(attendance.tanggal)
+        };
+    } catch (error) {
+        console.error('Absen masuk failed:', error);
+        throw error;
+    }
 }
 
 export async function absenPulang(input: AbsenPulangInput): Promise<Absensi | null> {

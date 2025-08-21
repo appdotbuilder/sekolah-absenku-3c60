@@ -1,4 +1,7 @@
+import { db } from '../db';
+import { siswaTable, absensiTable, kelasTable } from '../db/schema';
 import { type AttendanceFilter } from '../schema';
+import { eq, and, gte, lte, count, sql, type SQL } from 'drizzle-orm';
 
 export async function generateAttendanceReport(filter: AttendanceFilter): Promise<{
     data: Array<{
@@ -18,19 +21,153 @@ export async function generateAttendanceReport(filter: AttendanceFilter): Promis
         periode: { start: Date; end: Date };
     };
 }> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is to generate comprehensive attendance report
-    // Should aggregate attendance data based on provided filters
-    // Should calculate attendance percentages and summaries
-    // Used for both admin (all classes) and guru (managed classes) reports
-    return {
-        data: [],
-        summary: {
-            total_siswa: 0,
-            rata_rata_kehadiran: 0,
-            periode: { start: new Date(), end: new Date() }
+    try {
+        // Build base query with joins
+        const baseQuery = db.select({
+            siswa_id: siswaTable.id,
+            siswa_nama: siswaTable.nama,
+            nisn: siswaTable.nisn,
+            kelas: kelasTable.nama_kelas,
+            kelas_id: siswaTable.kelas_id
+        })
+        .from(siswaTable)
+        .innerJoin(kelasTable, eq(siswaTable.kelas_id, kelasTable.id));
+
+        // Apply siswa and kelas filters to base query
+        const baseConditions: SQL<unknown>[] = [];
+        
+        if (filter.siswa_id !== undefined) {
+            baseConditions.push(eq(siswaTable.id, filter.siswa_id));
         }
-    };
+        
+        if (filter.kelas_id !== undefined) {
+            baseConditions.push(eq(siswaTable.kelas_id, filter.kelas_id));
+        }
+
+        // Apply conditions if any exist
+        const studentsQuery = baseConditions.length > 0 
+            ? baseQuery.where(baseConditions.length === 1 ? baseConditions[0] : and(...baseConditions))
+            : baseQuery;
+
+        const students = await studentsQuery.execute();
+
+        if (students.length === 0) {
+            return {
+                data: [],
+                summary: {
+                    total_siswa: 0,
+                    rata_rata_kehadiran: 0,
+                    periode: { 
+                        start: filter.tanggal_mulai || new Date(), 
+                        end: filter.tanggal_selesai || new Date() 
+                    }
+                }
+            };
+        }
+
+        // Build attendance query conditions
+        const attendanceConditions: SQL<unknown>[] = [];
+        
+        if (filter.tanggal_mulai !== undefined) {
+            // Convert Date to string format for PostgreSQL date column
+            const startDateStr = filter.tanggal_mulai.toISOString().split('T')[0];
+            attendanceConditions.push(gte(absensiTable.tanggal, startDateStr));
+        }
+        
+        if (filter.tanggal_selesai !== undefined) {
+            // Convert Date to string format for PostgreSQL date column
+            const endDateStr = filter.tanggal_selesai.toISOString().split('T')[0];
+            attendanceConditions.push(lte(absensiTable.tanggal, endDateStr));
+        }
+        
+        if (filter.status !== undefined) {
+            attendanceConditions.push(eq(absensiTable.status, filter.status));
+        }
+
+        // Get attendance statistics for each student
+        const reportData = [];
+        let totalPercentage = 0;
+
+        for (const student of students) {
+            // Build attendance query conditions for this student
+            const studentAttendanceConditions = [eq(absensiTable.siswa_id, student.siswa_id), ...attendanceConditions];
+            
+            // Build attendance query for this student
+            const attendanceQuery = db.select({
+                status: absensiTable.status,
+                count: count()
+            })
+            .from(absensiTable)
+            .where(studentAttendanceConditions.length === 1 ? studentAttendanceConditions[0] : and(...studentAttendanceConditions))
+            .groupBy(absensiTable.status);
+
+            const attendanceStats = await attendanceQuery.execute();
+
+            // Initialize counts
+            let total_hadir = 0;
+            let total_izin = 0;
+            let total_sakit = 0;
+            let total_alpha = 0;
+
+            // Process attendance statistics
+            attendanceStats.forEach(stat => {
+                switch (stat.status) {
+                    case 'hadir':
+                        total_hadir = stat.count;
+                        break;
+                    case 'izin':
+                        total_izin = stat.count;
+                        break;
+                    case 'sakit':
+                        total_sakit = stat.count;
+                        break;
+                    case 'alpha':
+                        total_alpha = stat.count;
+                        break;
+                }
+            });
+
+            // Calculate attendance percentage
+            const totalDays = total_hadir + total_izin + total_sakit + total_alpha;
+            const persentase_kehadiran = totalDays > 0 ? (total_hadir / totalDays) * 100 : 0;
+            totalPercentage += persentase_kehadiran;
+
+            reportData.push({
+                siswa_id: student.siswa_id,
+                siswa_nama: student.siswa_nama,
+                nisn: student.nisn,
+                kelas: student.kelas,
+                total_hadir,
+                total_izin,
+                total_sakit,
+                total_alpha,
+                persentase_kehadiran: Math.round(persentase_kehadiran * 100) / 100 // Round to 2 decimal places
+            });
+        }
+
+        const rata_rata_kehadiran = students.length > 0 ? 
+            Math.round((totalPercentage / students.length) * 100) / 100 : 0;
+
+        // Determine period dates
+        const periodStart = filter.tanggal_mulai || new Date();
+        const periodEnd = filter.tanggal_selesai || new Date();
+
+        return {
+            data: reportData,
+            summary: {
+                total_siswa: students.length,
+                rata_rata_kehadiran,
+                periode: { 
+                    start: periodStart, 
+                    end: periodEnd 
+                }
+            }
+        };
+
+    } catch (error) {
+        console.error('Generate attendance report failed:', error);
+        throw error;
+    }
 }
 
 export async function generateDailyReport(date: Date, kelasId?: number): Promise<{

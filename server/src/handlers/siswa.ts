@@ -1,3 +1,5 @@
+import { db } from '../db';
+import { siswaTable } from '../db/schema';
 import { type CreateSiswaInput, type UpdateSiswaInput, type Siswa, type UpdateProfileInput } from '../schema';
 
 export async function createSiswa(input: CreateSiswaInput): Promise<Siswa> {
@@ -17,10 +19,16 @@ export async function createSiswa(input: CreateSiswaInput): Promise<Siswa> {
 }
 
 export async function getSiswa(): Promise<Siswa[]> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is to get all siswa records
-    // Should include relations to user and kelas data
-    return [];
+    try {
+        const results = await db.select()
+            .from(siswaTable)
+            .execute();
+
+        return results;
+    } catch (error) {
+        console.error('Get siswa failed:', error);
+        throw error;
+    }
 }
 
 export async function getSiswaById(id: number): Promise<Siswa | null> {
